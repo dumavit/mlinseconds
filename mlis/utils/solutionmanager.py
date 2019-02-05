@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from contextlib import contextmanager
 from . import speedtest
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class CaseData:
     def __init__(self, number, limits, train_data, test_data):
@@ -136,7 +135,6 @@ class SolutionManager():
         torch.manual_seed(case_data.number)
         timer = Timer(limits.time_limit, time_mult)
         model = solution.create_model(input_size, output_size)
-        model.to(device)
         context = TrainingContext(case_data, timer)
         step = solution.train_model(model, data, target, context)
         execution_time = timer.get_execution_time()

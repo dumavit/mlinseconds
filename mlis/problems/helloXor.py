@@ -10,6 +10,8 @@ import numpy as np
 from ..utils import solutionmanager as sm
 from ..utils.gridsearch import GridSearch
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 class SolutionModel(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
@@ -44,6 +46,7 @@ class Solution():
     def train_model(self, model, train_data, train_target, context):
         step = 0
         # Put model in train mode
+        model.to(device)
         model.train()
         while True:
             time_left = context.get_timer().get_time_left()
@@ -104,13 +107,13 @@ class DataProvider:
             [0.0, 1.0],
             [1.0, 0.0],
             [1.0, 1.0]
-        ]).to(sm.device)
+        ]).to(device)
         target = torch.FloatTensor([
             [0.0],
             [1.0],
             [1.0],
             [0.0]
-        ]).to(sm.device)
+        ]).to(device)
         return (data, target)
 
     def create_case_data(self, case):
