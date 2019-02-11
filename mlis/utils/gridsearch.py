@@ -76,14 +76,17 @@ class GridSearch():
             grid_attributes = self.get_grid_attributes(self.solution)
             grid_size = self.calc_grid_size(grid_attributes)
             grid_choice_history = {}
+            counter = 1
             while len(grid_choice_history) <  grid_size:
+                print('Case: {}/{}'.format(counter, grid_size))
+                counter += 1
                 choice_str, grid_choice = self.get_grid_choice(grid_attributes, grid_choice_history)
                 self.set_grid_choice(choice_str, grid_choice)
                 solution_manager.train_model(solution, case_data)
                 grid_choice_history[choice_str] = True
             print(solution_manager.accepted_string("[SEARCH COMPLETED]"))
             print("Specify case_number, if you want to search over other case data")
-            exit(0)
+            # exit(0)
 
     def log_step_value(self, name, value, step):
         if self.enabled:
