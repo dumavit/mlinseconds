@@ -2,80 +2,128 @@
 #
 # In this problem you need to implement model that will learn to recognize
 # handwritten digits
-import time
-import random
+import operator
 import torch
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 from ..utils import solutionmanager as sm
+from ..utils.gridsearch import GridSearch
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 class SolutionModel(nn.Module):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, params):
         super(SolutionModel, self).__init__()
         self.input_size = input_size
-        self.output_size = output_size
-        sm.SolutionManager.print_hint("Hint[1]: Experement with more deep networks")
-        self.hidden_size = 10
-        self.linear1 = nn.Linear(self.input_size, self.hidden_size)
-        sm.SolutionManager.print_hint("Hint[2]: You probably would need convolution network for this task")
-        self.linear2 = nn.Linear(self.hidden_size, self.output_size)
+        self.params = params
+
+        # Input channels = 1, output channels = 30
+        self.conv1 = nn.Conv2d(1, 30, 5, 1)
+        self.conv2 = nn.Conv2d(30, 50, 5, 1)
+        self.fc1 = nn.Linear(4 * 4 * 50, 500)
+        self.fc2 = nn.Linear(500, 10)
+
+        self.drop1 = nn.Dropout(0.25)
+        self.drop2 = nn.Dropout(0.25)
 
     def forward(self, x):
-        x = x.view(-1, self.input_size)
-        x = self.linear1(x)
-        x = torch.sigmoid(x)
-        x = self.linear2(x)
-        x = F.log_softmax(x, dim=1)
-        return x
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = self.drop1(x)
+
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = self.drop1(x)
+
+        # Flatten
+        x = x.view(-1, 4 * 4 * 50)
+
+        x = F.relu(self.fc1(x))
+        x = self.drop2(x)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+
 
 class Solution():
     def __init__(self):
-        self = self
+        self.lr = 0.0025
+        self.momentum = 0.1
+
+        # NOTE: Grids
+        self.lr_grid = list(np.linspace(0.0009, 0.005, 10))
+        self.momentum_grid = list(np.linspace(0.001, 1, 15))
+
+        self.grid_search = GridSearch(self)
+        self.grid_search.set_enabled(False)
 
     def create_model(self, input_size, output_size):
-        return SolutionModel(input_size, output_size)
+        return SolutionModel(input_size, output_size, self)
 
     # Return number of steps used
     def train_model(self, model, train_data, train_target, context):
         step = 0
         # Put model in train mode
+        model.to(device)
         model.train()
+        train_data = train_data.to(device)
+        train_target = train_target.to(device)
+
+        optimizer = optim.RMSprop(model.parameters(), lr=self.lr, alpha=0.9, momentum=0.1)
+        batch_size = 256
+        batches = train_data.size(0) // batch_size
+
         while True:
+            ind = step % batches
+            start_ind = batch_size * ind
+            end_ind = start_ind + batch_size
+
+            data = train_data[start_ind:end_ind]
+            target = train_target[start_ind:end_ind]
+
             time_left = context.get_timer().get_time_left()
             # No more time left, stop training
             if time_left < 0.1:
                 break
-            optimizer = optim.SGD(model.parameters(), lr=1.0)
-            sm.SolutionManager.print_hint("Hint[3]: Experement with approximating deriviative based on subset of data", step)
-            data = train_data
-            target = train_target
+
             # model.parameters()...gradient set to zero
             optimizer.zero_grad()
             # evaluate model => model.forward(data)
-            sm.SolutionManager.print_hint("Hint[4]: Experement with other activation fuctions", step)
             output = model(data)
             # get the index of the max probability
             predict = output.max(1, keepdim=True)[1]
             # Number of correct predictions
-            correct = predict.eq(target.view_as(predict)).long().sum().item()
             # Total number of needed predictions
             total = target.view(-1).size(0)
             # calculate loss
             loss = F.nll_loss(output, target)
+
+            # if correct / total > 0.95:  # correct == total:
+            #     # NOTE: Log stats
+            #     stats = {
+            #         'step': step,
+            #         'loss': round(loss.item(), 5),
+            #         'lr': self.lr,
+            #         # 'hs': self.hidden_sizes,
+            #         # 'act': self.activations,
+            #         'mom': getattr(self, 'momentum', 0)
+            #     }
+            #     print(stats)
+            #     if self.grid_search.enabled:
+            #         results.append(stats)
+            #     break
+
             # calculate deriviative of model.forward() and put it in model.parameters()...gradient
             loss.backward()
             # print progress of the learning
-            self.print_stats(step, loss, correct, total)
             # update model: model.parameters() -= lr * gradient
             optimizer.step()
             step += 1
         return step
-    
-    def print_stats(self, step, loss, correct, total):
-        if step % 100 == 0:
-            print("Step = {} Prediction = {}/{} Error = {}".format(step, correct, total, loss.item()))
+
 
 ###
 ###
@@ -84,9 +132,10 @@ class Solution():
 ###
 class Limits:
     def __init__(self):
-        self.time_limit = 2.0
+        self.time_limit = 2
         self.size_limit = 1000000
-        self.test_limit = 0.95
+        self.test_limit = 0.96
+
 
 class DataProvider:
     def __init__(self):
@@ -108,15 +157,17 @@ class DataProvider:
 
     def select_data(self, data, digits):
         data, target = data
+        data = data.to(device)
+        target = target.to(device)
         mask = target == -1
         for digit in digits:
             mask |= target == digit
-        indices = torch.arange(0,mask.size(0))[mask].long()
+        indices = torch.arange(0, mask.size(0))[mask].long().to(device)
         return (torch.index_select(data, dim=0, index=indices), target[mask])
 
     def create_case_data(self, case):
         if case == 1:
-            digits = [0,1]
+            digits = [0, 1]
         elif case == 2:
             digits = [8, 9]
         else:
@@ -142,4 +193,11 @@ class Config:
         return Solution()
 
 # If you want to run specific case, put number here
+# results = []
+
 sm.SolutionManager(Config()).run(case_number=-1)
+# if results:
+#     with open('results.txt', 'w') as f:
+#         text = '\n'.join(str(i) for i in sorted(
+#             results, key=operator.itemgetter('step')))
+#         f.write(text)
